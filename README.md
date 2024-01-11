@@ -1,11 +1,15 @@
-To run client project in your local.
+## Running locally client project.
 cd client
+
 npm install
+
 yarn dev
 
-To run client project in your local.
+## Running locally server project.
 cd server
+
 npm install
+
 yarn dev
 
 
