@@ -1,9 +1,11 @@
 import { Server } from 'socket.io';
 import { createServer } from 'http';
 import SessionStore from './SessionStore';
+import MessageStore from './MessageStore';
 const { instrument } = require("@socket.io/admin-ui");
 const crypto = require('crypto');
 
+const messageStore = new MessageStore();
 const store = new SessionStore();
 const httpServer = createServer();
 
@@ -41,34 +43,55 @@ io.use((socket: any, next) => {
     store.saveSession(socket.sessionID, {
         userID: socket.userID,
         username: socket.username,
+        connected: true
     });
     next();
 })
 
 io.on('connection', (socket: any) => {
     const users: any = [];
-    console.log("+++++++store session++++++++++++++", store.findAllSessions().length);
+    const messages = messageStore.findMessagesForUser(socket.userID);
+    const messageInfo = new Map();
+    if (messages) {
+        messages.forEach((message: any) => {
+            const otherUser = message.from === socket.userID ? message.to : message.from;
+            if (messageInfo.has(otherUser)) {
+                messageInfo.get(otherUser).push({
+                    ...message,
+                    fromSelf: socket.userID === message.from
+                });
+            } else {
+                const data = {
+                    ...message,
+                    fromSelf: socket.userID === message.from
+                }
+                messageInfo.set(otherUser, [data]);
+            }
+        })
+    }
+    console.log("+++++++messageInfo map++++++++++++++", messageInfo);
     store.findAllSessions().forEach((session: any) => {
         users.push({
             userID: session.userID,
             username: session.username,
+            connected: session.connected,
+            messages: messageInfo.get(session.userID) || [],
         });
     });
     console.log("Users on server+++++++++++++++", users);
     socket.join(socket.userID);
-    socket.emit('users', users);
+    // Emitting the session from server to client
+    socket.emit("session", { // Third
+        sessionID: socket.sessionID,
+        userID: socket.userID,
+    });
+    socket.emit('users', users); // FIRST
 
     // notify existing users
-    socket.broadcast.emit("user connected", {
+    socket.broadcast.emit("user connected", { // Second
         userID: socket.userID,
         username: socket.username,
         connected: true,
-    });
-
-    // Emitting the session from server to client
-    socket.emit("session", {
-        sessionID: socket.sessionID,
-        userID: socket.userID,
     });
 
     socket.on("private message", ({ content, to }: any) => {
@@ -77,6 +100,12 @@ io.on('connection', (socket: any) => {
             from: socket.userID,
             to
         });
+        messageStore.saveMessage({
+            content,
+            from: socket.userID,
+            to
+        }
+        )
     });
 
     socket.on('disconnect', async () => {
